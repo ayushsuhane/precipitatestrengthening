@@ -106,34 +106,34 @@ int main(int argc, char *argv[])
     load_inputs(&temperature_inC, &comp_initial);
 
     /*Internal Parameters*/
-    double comp0 = 1.13, deltaG_sol = 17000; // equilibrium composition parameters
-    double deltaG_nucleation = 168900; //eV
-    double surface_energy = 0.3; // J/m^2
-    double N_initial = 10000;
-    double D0 = 2.348e-5, deltaG_d = 126211; //diffusion parameters, m^2/s, J/mol
+    double comp0 = 1.13, deltaG_sol = 17000; 	// Solubility limit, units - at. fr., J/mol
+    double deltaG_nucleation = 168900; 		// Activation energy for nucleation, units - J/mol
+    double surface_energy = 0.3; 		// J/m^2
+    double N_initial = 10000; 			// Initial number of nucleus
+    double D0 = 2.348e-5, deltaG_d = 126211; 	//diffusion parameters, units - m^2/s, J/mol
 
     /*Variables for stress calculation*/
-    double r_critical = 3.4e-9; //m
-    double bulk_modulus = 26000; //MPa
-    double burger_vector = 2.86e-10;
-    double taylor_factor = 1.5;
-    double sigma_0 = 10; //MPa
-    double constant_solidsolution = 840; //MPa
-    double line_force = 0.5 * bulk_modulus * burger_vector * burger_vector;
+    double r_critical = 3.4e-9; 		// Critical radius for shearable to non-shearable transition, units - m
+    double bulk_modulus = 26000; 		// units - MPa
+    double burger_vector = 2.86e-10;		// units - m
+    double taylor_factor = 1.5;			
+    double sigma_0 = 10; //MPa	
+    double constant_solidsolution = 840; 	// units - MPa
+    double line_force = 0.5 * bulk_modulus * burger_vector * burger_vector; // units - MPa m^2
 
 
 
     /*Constants*/
-    double gas_constant = 8.314;
-    double lattice_parameter = 5.18e-10; // Angstroms
-    double zeldovich_parameter = 0.05; 
-    double molar_volume = 7.1e-6; //m^3/mol
-    double Na = 6.023e23; // atoms/mol
-    double atomic_volume = Na/molar_volume; // atoms/m^3
+    double gas_constant = 8.314;		// units - J/mol/K
+    double lattice_parameter = 5.18e-10; 	// units - m
+    double zeldovich_parameter = 0.05; 		// Attachment frequency
+    double molar_volume = 7.1e-6; 		// units - m^3/mol
+    double Na = 6.023e23; 			// units - #atoms/mol
+    double atomic_volume = Na/molar_volume; 	// units - #atoms/m^3
 
 
     /*Variables*/
-    double time = 0;
+    double time = 0;				// units - s
     //double dt = 0.1;
     double dt_initial = 0.01;
 
@@ -171,19 +171,34 @@ int main(int argc, char *argv[])
 
     while((time < total_time) && (comp > comp_eq) )
     {
+	/* Logarithmic time scale*/
         dt = pow(10, log10(dt_initial) + (count)/100.0);
+	
+	/* Driving force for precipitation calculation */
         deltaG_vol = - gas_constant * temperature * log(comp/comp_eq); // J/mol
+
+	/* critical radius for stable nucleus */
         r_star = -2.0 * surface_energy * molar_volume / deltaG_vol ;
+	
+	/* atom attachment frequency for growth */ 
         beta = 4 * PI * r_star * r_star * diffusivity * comp / pow(lattice_parameter, 4);
+
+	/* activation energy for nucleation */
         deltaG_star = deltaG_nucleation/(log(comp/comp_eq) * log(comp/comp_eq)); // J/mol
+	
+	/* residence time */
         tau = 1.0/(2*beta*zeldovich_parameter);
 
+	/* Precipitate Growth rates in mean-field description*/
         drdt_nucleation = calc_drdt_nucleation(radius, N_nucleus, dndt, alpha, r_star);
         drdt_growth = calc_drdt_growth(radius, diffusivity, comp, comp_eq, r0);
         drdt_coarsening = calc_drdt_coarsening(kappa, radius);
-        
+
+	/* Precipitate nucleation rates in mean-field description */
         dndt_growth = calc_dndt_growth(zeldovich_parameter, beta, atomic_volume, deltaG_star, gas_constant, temperature, tau, time);
         dndt_coarsening = calc_dndt_coarsening(radius, kappa, r0, comp, N_nucleus);
+
+	/* Switch from nucleation + growth to growth + coarsening stage */
         fcoarse = calc_fcoarse(radius, r_star);
         transition = calc_transition(dndt_coarsening, dndt_growth);
         
@@ -191,6 +206,10 @@ int main(int argc, char *argv[])
         else drdt = drdt_growth + drdt_nucleation;
         if(transition > 0.1) dndt = fcoarse*dndt_coarsening;
         else dndt = dndt_growth;
+
+	/* Update precipitate radius, number of nucleus, and composition in the matrix */
+	/* Note that the volume fraction assumes pure precipitate of Mg, i.e. comp_ppt = 1 in mass balance equation
+	   [comp_initial] = vf * ([comp_ppt]) + (1 - vf) * ([comp_matrix]) */
         
         r_new = radius + drdt*dt;
         N_new = N_nucleus + dndt*dt;
@@ -200,18 +219,22 @@ int main(int argc, char *argv[])
         radius = r_new;
         N_nucleus = N_new;
         comp = comp_new;
-        
-
+        /********************************************************************************/
+	/* Strength calculation */
+	/********************************************************************************/
+	/* force for shearable and non-shearable precipitate */
         if(radius < r_critical) force = 2 * line_force * radius/r_critical;
         else force = 2 * line_force;
-
+	
+	
         interparticle_spacing = (radius / 2.0)  * sqrt(PI / vf);
-
+	
+	/* calculating solid solution strength and precipitation strength due to precipitate evolution */
         sigma_solidsolution = constant_solidsolution * pow(comp, 2.0/3.0);
         sigma_ppt = taylor_factor * pow(force/2.0, 1.5) / (burger_vector * pow(line_force, 0.5) * interparticle_spacing );
         sigma_total = sigma_0 + sigma_solidsolution + sigma_ppt;
 
-        
+        /* storing the heat treatment time to reach maximum strength in the process */
         if (sigma_total > sigma_max) 
         {
             sigma_max = sigma_total;
